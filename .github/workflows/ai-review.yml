@@ -1,0 +1,48 @@
+name: ai-review
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        run: |
+          git diff origin/${{ github.event.pull_request.base.ref }}...${{ github.event.pull_request.head.sha }} \
+            -- . ':(exclude)*.lock' ':(exclude)dist/*' > diff.txt
+
+      - name: Run review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node review.js diff.txt > review.json
+
+      - name: Post review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { summary, comments } = JSON.parse(fs.readFileSync('review.json', 'utf8'));
+            const fence = String.fromCharCode(96).repeat(3);
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              commit_id: context.payload.pull_request.head.sha,
+              event: 'COMMENT',
+              body: summary || 'AI-ревью: замечаний нет',
+              comments: comments.map(c => ({
+                path: c.file,
+                line: c.line,
+                side: 'RIGHT',
+                body: '**' + c.severity + '**: ' + c.message +
+                  (c.suggestion ? '\n\n' + fence + 'suggestion\n' + c.suggestion + '\n' + fence : '')
+              }))
+            });
