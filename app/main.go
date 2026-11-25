@@ -29,9 +29,9 @@ func main() {
 func create(w http.ResponseWriter, r *http.Request) {
 	title := r.URL.Query().Get("title")
 	body := r.URL.Query().Get("body")
-	q := "INSERT INTO notes (title, body) VALUES ('" + title + "', '" + body + "')"
+	q := "INSERT INTO notes (title, body) VALUES (?, ?)"
 	fmt.Println(q)
-	_, err := db.Exec(q)
+	_, err := db.Exec(q, title, body)
 	if err != nil {
 		w.Write([]byte(err.Error()))
 		return
