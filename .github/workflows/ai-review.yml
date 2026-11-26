@@ -21,7 +21,7 @@ jobs:
 
       - name: Run review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
         run: node review.js diff.txt > review.json
 
       - name: Post review
