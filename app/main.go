@@ -106,7 +106,7 @@ func export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Password")), []byte(os.Getenv("ADMIN_PASSWORD"))) != 1 {
-		w.Write([]byte("forbidden"))
+http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	file := r.URL.Query().Get("file")
