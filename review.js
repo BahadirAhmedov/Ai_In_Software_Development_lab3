@@ -23,14 +23,26 @@ if (changedLines > MAX_LINES || changedFiles > MAX_FILES) {
   process.exit(0);
 }
 
-// Проставляем номера строк новой версии файла, чтобы модели не нужно было считать
+// Проставляем номера строк новой версии файла, чтобы модели не нужно было считать.
+// Заодно запоминаем, какие строки каких файлов есть в diff (на них можно комментировать).
+const allowed = {}; // { "app/main.go": Set(12, 13, ...) }
+
 function numberDiff(text) {
+  let file = null;
   let line = 0;
   return text.split('\n').map(row => {
+    if (row.startsWith('+++ ')) {
+      file = row.startsWith('+++ b/') ? row.slice(6) : null;
+      if (file) allowed[file] = new Set();
+      return row;
+    }
     const hunk = row.match(/^@@ -\d+(?:,\d+)? \+(\d+)/);
     if (hunk) { line = Number(hunk[1]); return row; }
-    if (row.startsWith('+++') || row.startsWith('---')) return row;
-    if (row.startsWith('+') || row.startsWith(' ')) return `${line++}: ${row}`;
+    if (row.startsWith('---')) return row;
+    if (row.startsWith('+') || row.startsWith(' ')) {
+      if (file) allowed[file].add(line);
+      return `${line++}: ${row}`;
+    }
     if (row.startsWith('-')) return `    ${row}`; // удалённая строка — без номера
     return row;
   }).join('\n');
@@ -47,6 +59,53 @@ const prompt = `Сделай ревью этого diff по инструкци�
 <diff>
 ${numberDiff(diff)}
 </diff>`;
+
+// Что публикуем, если что-то пошло не так. Workflow при этом не падает.
+function fallback(reason) {
+  console.error('AI-ревью не выполнено:', reason); // подробности — в лог Actions
+  console.log(JSON.stringify({
+    summary: `AI-ревью не выполнено: ${reason}. Нужна ручная проверка PR.`,
+    comments: [],
+  }));
+}
+
+// Достаём JSON из ответа и проверяем, что он нужной формы
+function parseReview(text) {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('в ответе модели нет JSON');
+
+  let review;
+  try {
+    review = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    throw new Error('модель вернула невалидный JSON');
+  }
+
+  if (typeof review !== 'object' || review === null || !Array.isArray(review.comments)) {
+    throw new Error('в ответе модели нет списка comments');
+  }
+
+  // Плохие отдельные комментарии выбрасываем, хорошие оставляем
+  const comments = review.comments.filter(c =>
+    c && typeof c.message === 'string' &&
+    allowed[c.file] && allowed[c.file].has(Number(c.line))
+  ).map(c => ({
+    file: c.file,
+    line: Number(c.line),
+    severity: String(c.severity || 'minor'),
+    message: c.message,
+    ...(typeof c.suggestion === 'string' && c.suggestion ? { suggestion: c.suggestion } : {}),
+  }));
+
+  const dropped = review.comments.length - comments.length;
+  let summary = typeof review.summary === 'string' ? review.summary : '';
+  if (dropped > 0) {
+    console.error(`Отброшено некорректных комментариев: ${dropped}`);
+    summary += `\n\n_Отброшено комментариев с некорректным файлом или строкой: ${dropped}._`;
+  }
+  return { summary, comments };
+}
 
 async function main() {
   const res = await fetch('https://api.z.ai/api/paas/v4/chat/completions', {
@@ -65,12 +124,22 @@ async function main() {
     }),
   });
 
-  const data = await res.json();
-  const text = data.choices[0].message.content;
+  if (!res.ok) {
+    console.error(await res.text());
+    return fallback(`API модели вернул ошибку ${res.status}`);
+  }
 
-  // Берём JSON из ответа модели и печатаем его
-  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  console.log(json);
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) return fallback('модель вернула пустой ответ');
+
+  try {
+    console.log(JSON.stringify(parseReview(text)));
+  } catch (err) {
+    console.error('Ответ модели:\n' + text);
+    fallback(err.message);
+  }
 }
 
-main();
+// Любая неожиданная ошибка (сеть, таймаут и т.п.) — тоже fallback, а не падение
+main().catch(err => fallback(`ошибка при обращении к модели (${err.message})`));
