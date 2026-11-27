@@ -58,7 +58,10 @@ const prompt = `Сделай ревью этого diff по инструкци�
 
 <diff>
 ${numberDiff(diff)}
-</diff>`;
+</diff>
+
+Ответ — строго один JSON-объект в формате из раздела «Формат ответа» инструкций:
+{"summary": "...", "comments": [...]}. Без текста до и после, без markdown.`;
 
 // Что публикуем, если что-то пошло не так. Workflow при этом не падает.
 function fallback(reason) {
@@ -116,7 +119,8 @@ async function main() {
     },
     body: JSON.stringify({
       model: 'glm-5.3',
-      max_tokens: 8192,
+      max_tokens: 32000, // с запасом: модель сначала «думает», это тоже тратит токены
+      response_format: { type: 'json_object' }, // JSON-режим: ответ всегда JSON
       messages: [
         { role: 'system', content: rules },
         { role: 'user', content: prompt },
@@ -130,7 +134,16 @@ async function main() {
   }
 
   const data = await res.json();
-  const text = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content;
+
+  // Диагностика в лог Actions: почему модель закончила ответ и сколько токенов ушло
+  console.error('finish_reason:', choice?.finish_reason, '| usage:', JSON.stringify(data?.usage));
+
+  if (choice?.finish_reason === 'length') {
+    console.error('Ответ модели (обрезан):\n' + (text || ''));
+    return fallback('ответ модели обрезан по лимиту токенов');
+  }
   if (!text) return fallback('модель вернула пустой ответ');
 
   try {
