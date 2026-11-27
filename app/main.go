@@ -111,7 +111,13 @@ http.Error(w, "forbidden", http.StatusForbidden)
 	}
 	file := r.URL.Query().Get("file")
 	order := r.URL.Query().Get("order")
-	q := "SELECT id, title, body FROM notes ORDER BY " + order
+switch order {
+case "id", "id DESC", "title", "title DESC":
+default:
+	http.Error(w, "invalid order", http.StatusBadRequest)
+	return
+}
+q := "SELECT id, title, body FROM notes ORDER BY " + order
 	fmt.Println(q)
 	rows, _ := db.Query(q)
 	out := ""
