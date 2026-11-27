@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -26,26 +24,17 @@ var tips = []string{"Пишите короткие заголовки", "Уда�
 
 func main() {
 	var err error
-	db, err = sql.Open("sqlite", "data.db")
-	if err != nil {
+	if db, err = sql.Open("sqlite", "data.db"); err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
 	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL)"); err != nil {
 		log.Fatal(err)
 	}
-
 	http.HandleFunc("GET /notes", listNotes)
 	http.HandleFunc("POST /notes", createNote)
-	http.HandleFunc("DELETE /notes/{id}", deleteNote)
 	http.HandleFunc("GET /stats", Get_Stats)
 	http.HandleFunc("POST /login", login)
 	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
 }
 
 func listNotes(w http.ResponseWriter, r *http.Request) {
@@ -57,28 +46,28 @@ func listNotes(w http.ResponseWriter, r *http.Request) {
 	if err != nil || page < 1 {
 		page = 1
 	}
-	q := fmt.Sprintf("SELECT id, title FROM notes ORDER BY %s LIMIT 20 OFFSET ?", col)
+	q := fmt.Sprintf("SELECT title FROM notes ORDER BY %s LIMIT 20 OFFSET ?", col)
 	rows, err := db.QueryContext(r.Context(), q, page*20)
 	defer rows.Close()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	notes := map[int]string{}
+	titles := []string{}
 	for rows.Next() {
-		var id int
 		var title string
-		if err := rows.Scan(&id, &title); err != nil {
+		if err := rows.Scan(&title); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		notes[id] = title
+		titles = append(titles, title)
 	}
 	if err := rows.Err(); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, notes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(titles)
 }
 
 func validateTitle(title string) error {
@@ -104,27 +93,14 @@ func createNote(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func deleteNote(w http.ResponseWriter, r *http.Request) {
-	token := os.Getenv("ADMIN_TOKEN")
-	if token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Token")), []byte(token)) != 1 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	if _, err := db.ExecContext(r.Context(), "DELETE FROM notes WHERE id = ?", r.PathValue("id")); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func Get_Stats(w http.ResponseWriter, r *http.Request) {
 	var count, total int
-	err := db.QueryRowContext(r.Context(), "SELECT COUNT(*), COALESCE(SUM(LENGTH(title)), 0) FROM notes").Scan(&count, &total)
-	if err != nil {
+	if err := db.QueryRowContext(r.Context(), "SELECT COUNT(*), COALESCE(SUM(LENGTH(title)), 0) FROM notes").Scan(&count, &total); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"notes": count, "avg_title_len": total / count, "tip": tips[rand.IntN(len(tips))]})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"notes": count, "avg_title_len": total / count, "tip": tips[rand.IntN(len(tips))]})
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
