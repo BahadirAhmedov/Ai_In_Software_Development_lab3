@@ -4,6 +4,25 @@ const fs = require('fs');
 const diff = fs.readFileSync(process.argv[2], 'utf8');
 const rules = fs.readFileSync('.github/review-instructions.md', 'utf8');
 
+// Порог размера PR: больше — модель не зовём
+const MAX_LINES = 500; // изменённых строк (+ и -)
+const MAX_FILES = 20;  // изменённых файлов
+
+const rows = diff.split('\n');
+const changedLines = rows.filter(r =>
+  (r.startsWith('+') || r.startsWith('-')) && !r.startsWith('+++') && !r.startsWith('---')
+).length;
+const changedFiles = rows.filter(r => r.startsWith('diff --git')).length;
+
+if (changedLines > MAX_LINES || changedFiles > MAX_FILES) {
+  console.log(JSON.stringify({
+    summary: `PR слишком большой для автоматического ревью (изменено строк: ${changedLines}, файлов: ${changedFiles}; ` +
+      `лимит: ${MAX_LINES} строк, ${MAX_FILES} файлов), review пропущен.`,
+    comments: [],
+  }));
+  process.exit(0);
+}
+
 // Проставляем номера строк новой версии файла, чтобы модели не нужно было считать
 function numberDiff(text) {
   let line = 0;
