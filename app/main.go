@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
 
 	_ "modernc.org/sqlite"
 )
@@ -21,6 +22,7 @@ func main() {
 	http.HandleFunc("/get", get)
 	http.HandleFunc("/update", update)
 	http.HandleFunc("/delete", delete)
+	http.HandleFunc("/export", export)
 
 	fmt.Println("server on :8080, admin password: " + password)
 	http.ListenAndServe(":8080", nil)
@@ -96,4 +98,25 @@ func delete(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(q)
 	db.Exec(q)
 	w.Write([]byte("deleted"))
+}
+
+func export(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("password") != password {
+		w.Write([]byte("forbidden"))
+		return
+	}
+	file := r.URL.Query().Get("file")
+	order := r.URL.Query().Get("order")
+	q := "SELECT id, title, body FROM notes ORDER BY " + order
+	fmt.Println(q)
+	rows, _ := db.Query(q)
+	out := ""
+	for rows.Next() {
+		var id int
+		var title, body string
+		rows.Scan(&id, &title, &body)
+		out = out + fmt.Sprint(id) + "," + title + "," + body + "\n"
+	}
+	os.WriteFile("exports/"+file, []byte(out), 0777)
+	w.Write([]byte("exported to exports/" + file))
 }
