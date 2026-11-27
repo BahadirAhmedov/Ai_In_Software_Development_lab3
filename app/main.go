@@ -105,7 +105,7 @@ func export(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if r.URL.Query().Get("password") != password {
+if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Password")), []byte(os.Getenv("ADMIN_PASSWORD"))) != 1 {
 		w.Write([]byte("forbidden"))
 		return
 	}
