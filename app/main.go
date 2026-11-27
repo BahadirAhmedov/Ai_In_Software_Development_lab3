@@ -101,6 +101,10 @@ func delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func export(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if r.URL.Query().Get("password") != password {
 		w.Write([]byte("forbidden"))
 		return
