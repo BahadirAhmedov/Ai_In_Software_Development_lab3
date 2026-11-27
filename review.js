@@ -2,13 +2,36 @@
 const fs = require('fs');
 
 const diff = fs.readFileSync(process.argv[2], 'utf8');
+const rules = fs.readFileSync('.github/review-instructions.md', 'utf8');
 
-const prompt = `Сделай код-ревью этого diff. Ищи баги и уязвимости, не стиль.
+// Проставляем номера строк новой версии файла, чтобы модели не нужно было считать
+function numberDiff(text) {
+  let line = 0;
+  return text.split('\n').map(row => {
+    const hunk = row.match(/^@@ -\d+(?:,\d+)? \+(\d+)/);
+    if (hunk) { line = Number(hunk[1]); return row; }
+    if (row.startsWith('+++') || row.startsWith('---')) return row;
+    if (row.startsWith('+') || row.startsWith(' ')) return `${line++}: ${row}`;
+    if (row.startsWith('-')) return `    ${row}`; // удалённая строка — без номера
+    return row;
+  }).join('\n');
+}
+
+const prompt = `Сделай код-ревью этого diff строго по правилам ниже.
+Комментируй только то, что нарушает правила. Уровень (severity) бери из правил.
+
+<rules>
+${rules}
+</rules>
+
+В diff перед каждой строкой стоит её номер в новой версии файла, например "42: +код".
+В поле "line" указывай именно этот номер. Удалённые строки (без номера) не комментируй.
+
 Ответь только JSON без markdown:
-{"summary": "общий вывод", "comments": [{"file": "путь", "line": номер строки в новой версии, "severity": "critical|warning|nit", "message": "что не так", "suggestion": "исправленный код (необязательно)"}]}
+{"summary": "общий вывод", "comments": [{"file": "путь из строки +++ b/...", "line": номер строки, "severity": "error|warning|nit", "message": "что не так", "suggestion": "исправленный код (необязательно)"}]}
 
 <diff>
-${diff}
+${numberDiff(diff)}
 </diff>`;
 
 async function main() {
